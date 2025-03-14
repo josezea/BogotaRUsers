@@ -12,21 +12,22 @@ El ecosistema de R para el análisis de datos sigue evolucionando, y dplyr se ha
 
 📂 Contenido del repositorio
 
-sesion.Rmd: Código y ejemplos utilizados en la sesión.
+- sesion2.Rmd: Código y ejemplos utilizados en la sesión.
 
-Datos para la práctica computacional: Enlace a Dropbox
+- Datos para la práctica computacional: Enlace a Dropbox a los datos: https://www.dropbox.com/scl/fo/8v04ytxh4g0pj32ir4c3l/AFJvfv9KnhwfN5TJC2ztwZc?rlkey=em5q45s6ozhh8vkara0auwe1j&st=q43t501w&dl=0
 
-Material adicional y referencias.
+- Material adicional y referencias.
+
 
 🚀 Tecnologías utilizadas
 
-R y el paquete dplyr
+- R y el paquete dplyr
 
-DuckDB para procesamiento de datos en memoria
+- DuckDB para procesamiento de datos en memoria
 
-Arrow para manipulación eficiente de datos en formato columnar
+- Arrow para manipulación eficiente de datos en formato columnar
 
-BigQuery para análisis en la nube
+- BigQuery para análisis en la nube
 
 🛠 Requisitos
 
