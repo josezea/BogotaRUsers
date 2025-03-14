@@ -1,3 +1,5 @@
+# dplyr como API unificada: Procesando datos masivos con DuckDB, Arrow y BigQuery
+
 Procesando datos masivos con DuckDB, Arrow y BigQuery
 
 Este repositorio contiene el código y los materiales utilizados en la charla "Procesando datos masivos con DuckDB, Arrow y BigQuery", organizada por el Bogotá R Users Group en Meetup.
