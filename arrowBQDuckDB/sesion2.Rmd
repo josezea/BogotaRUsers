@@ -1,0 +1,469 @@
+---
+title: "Bigquery a R"
+output: html_document
+date: "2025-03-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Cargamos los paquetes:
+
+
+```{r}
+library(arrow)
+library(dplyr)
+library(bigrquery)
+library(DBI)
+library(dbplyr)
+library(duckdb)
+library(tictoc)
+```
+
+# Arrow
+
+Veamos las carpetas donde está el parquet:
+
+```{r}
+setwd( "censo_parquet")
+dir()
+```
+
+
+```{r}
+setwd("censo_parquet")
+censo_per_lz <- open_dataset("personas")
+censo_viv_lz <- open_dataset("viviendas")
+```
+Contemos cuanto tiene la base de personas:
+
+
+```{r}
+tic()
+censo_per_lz %>% count() %>% collect()
+toc()
+```
+
+Veamos cuales son las variables del censo:
+
+```{r}
+prueba <- censo_per_lz %>% head() %>% collect()
+```
+
+
+Hagamos una consulta sencilla, de entender como es la distribución del cento por estrato:
+
+```{r}
+tic()
+query1 <- censo_per_lz %>% select(COD_ENCUESTAS, U_DPTO, U_MPIO) %>% 
+  inner_join(censo_viv_lz %>% select(COD_ENCUESTAS, VA1_ESTRATO), by = "COD_ENCUESTAS") %>% 
+  group_by(U_DPTO, U_MPIO, VA1_ESTRATO) %>% count() %>% ungroup() %>% collect() %>% 
+  arrange(U_DPTO, U_MPIO, VA1_ESTRATO) %>% group_by(U_DPTO, U_MPIO) %>% 
+  mutate(por = round(n / sum(n) * 100, 1))
+toc() 
+library(reshape2)
+
+query1a <- dcast(U_DPTO +  U_MPIO ~  VA1_ESTRATO , value.var = "por", data = query1) %>% as_tibble()
+
+
+```
+
+
+
+
+
+
+# Duckdb
+
+Carguemos la tabla de personas a la base de datos DUCKDB
+
+```{r}
+# Lectura a archivo csv a una base duckdb 
+# Crear una conexión a una base duckdb
+con <- DBI::dbConnect(drv = duckdb::duckdb(), 
+                      dbdir = "censo")
+
+# Define the schema as a named list
+schema <- c(
+  TIPO_REG = "INTEGER",
+  U_DPTO = "VARCHAR",
+  U_MPIO = "VARCHAR",
+  UA_CLASE = "INTEGER",
+  COD_ENCUESTAS = "INTEGER",
+  U_VIVIENDA = "INTEGER",
+  P_NROHOG = "INTEGER",
+  P_NRO_PER = "INTEGER",
+  P_SEXO = "INTEGER",
+  P_EDADR = "INTEGER",
+  P_PARENTESCOR = "INTEGER",
+  PA1_GRP_ETNIC = "INTEGER",
+  PA11_COD_ETNIA = "BOOLEAN",
+  PA12_CLAN = "BOOLEAN",
+  PA21_COD_VITSA = "BOOLEAN",
+  PA22_COD_KUMPA = "BOOLEAN",
+  PA_HABLA_LENG = "BOOLEAN",
+  PA1_ENTIENDE = "BOOLEAN",
+  PB_OTRAS_LENG = "BOOLEAN",
+  PB1_QOTRAS_LENG = "BOOLEAN",
+  PA_LUG_NAC = "INTEGER",
+  PA_VIVIA_5ANOS = "INTEGER",
+  PA_VIVIA_1ANO = "INTEGER",
+  P_ENFERMO = "INTEGER",
+  P_QUEHIZO_PPAL = "INTEGER",
+  PA_LO_ATENDIERON = "INTEGER",
+  PA1_CALIDAD_SERV = "INTEGER",
+  CONDICION_FISICA = "INTEGER",
+  P_ALFABETA = "INTEGER",
+  PA_ASISTENCIA = "INTEGER",
+  P_NIVEL_ANOSR = "INTEGER",
+  P_TRABAJO = "INTEGER",
+  P_EST_CIVIL = "INTEGER",
+  PA_HNV = "INTEGER",
+  PA1_THNV = "INTEGER",
+  PA2_HNVH = "INTEGER",
+  PA3_HNVM = "INTEGER",
+  PA_HNVS = "INTEGER",
+  PA1_THSV = "INTEGER",
+  PA2_HSVH = "INTEGER",
+  PA3_HSVM = "INTEGER",
+  PA_HFC = "INTEGER",
+  PA1_THFC = "INTEGER",
+  PA2_HFCH = "INTEGER",
+  PA3_HFCM = "INTEGER",
+  PA_UHNV = "INTEGER",
+  PA1_MES_UHNV = "INTEGER",
+  PA2_ANO_UHNV = "INTEGER"
+)
+
+duckdb_read_csv(con,
+                name = "personas", 
+                files = "colombia_personas.csv",
+                col.types	= schema)
+
+```
+Carguemos a la base duckdb una tabla en parquet:
+
+```{r}
+# Lectura a archivo csv a una base duckdb 
+# Crear una conexión a una base duckdb
+viviendas_lz <- open_dataset("censo_parquet/viviendas")
+viviendas_duck <- to_duckdb(viviendas_lz, con, 
+                              "viviendas")
+```
+Contemos cuantas viviendas hay:
+
+```{r}
+viviendas_duck %>% count() %>% collect()
+```
+
+Obserrvemos que la tabla del censo es un poco más de 40 millones al igual que cuando lo hicimos con arrow:
+
+```{r}
+personaduck_lz <- tbl(con, "personas") # Tabla lazy
+personaduck_lz %>% count() %>% collect()
+
+```
+Repliquemos la misma consulta:
+
+
+```{r}
+tic()
+query1 <- personaduck_lz %>% select(COD_ENCUESTAS, U_DPTO, U_MPIO) %>% 
+  inner_join(viviendas_duck %>% select(COD_ENCUESTAS, VA1_ESTRATO), by = "COD_ENCUESTAS") %>% 
+  group_by(U_DPTO, U_MPIO, VA1_ESTRATO) %>% count() %>% ungroup() %>% collect() %>% 
+  arrange(U_DPTO, U_MPIO, VA1_ESTRATO) %>% group_by(U_DPTO, U_MPIO) %>% 
+  mutate(por = round(n / sum(n) * 100, 1))
+toc()
+```
+# Bigquery
+
+Ahora trabajemos de bigquery:
+
+
+```{r}
+library(DBI) 
+library(bigrquery)
+library(dbplyr)
+library(lubridate)
+library(tictoc) # Limpieza de nombres
+```
+Nos conectamos al proyecto:
+
+```{r, warning=FALSE, message=FALSE}
+key_path <- Sys.getenv("BIGQUERYBRUG_KEY_PATH")
+bq_auth(path = key_path)
+str_project <- "premium-summit-449818-d0"
+con <- DBI::dbConnect(bigquery(), project = str_project, dataset = "SANDBOX")
+```
+
+Leemos de forma "lazy" las tablas del censo de población:
+
+```{r, warning=FALSE, message=FALSE}
+string_personas <- "SELECT * FROM `premium-summit-449818-d0.censo2018.personas`"
+string_viviendas <- "SELECT * FROM `premium-summit-449818-d0.censo2018.viviendas`"
+
+df_personas_lz <- tbl(con, sql(string_personas))
+df_viviendas_lz <- tbl(con, sql(string_viviendas))
+
+df_viviendas_lz %>% count() #%>% collect()
+
+```
+Saquemos la misma función:
+
+```{r}
+query3 <- df_personas_lz %>% select(COD_ENCUESTAS, U_DPTO, U_MPIO) %>% 
+  inner_join(df_viviendas_lz %>% select(COD_ENCUESTAS, VA1_ESTRATO), by = "COD_ENCUESTAS") %>% 
+  group_by(U_DPTO, U_MPIO, VA1_ESTRATO) %>% count() %>% ungroup() %>% collect() %>% 
+  arrange(U_DPTO, U_MPIO, VA1_ESTRATO) %>% group_by(U_DPTO, U_MPIO) %>% 
+  mutate(por = round(n / sum(n) * 100, 1))
+```
+
+Algunos casos de uso interesantes
+
+## 1. Escribir el resultado en un dataframe a bigquery
+premium-summit-449818-d0.censo2018.personas
+
+```{r}
+bq_censo <- bq_table(
+  project = "premium-summit-449818-d0", 
+  dataset = "censo2018", 
+  table = "analisis_estrato"
+)
+
+# Verificar si la tabla ya existe antes de crearla
+if (!bq_table_exists(bq_censo)) {
+  bq_table_create(
+    bq_censo, 
+    as_bq_fields(query3)  # Define el esquema con el mismo orden de columnas
+  )
+}
+
+# Subir los datos a la tabla (sin recrearla)
+bq_table_upload(
+  x = bq_censo, 
+  values = query3,  
+  write_disposition = "WRITE_APPEND",  # Agregar sin borrar datos previos
+  create_disposition = "CREATE_NEVER"  # Evitar crear la tabla nuevamente
+)
+```
+
+
+
+## Escribir el resultado en un dataframe lazy a bigquery
+
+```{r}
+string_Bta <- "SELECT * FROM `premium-summit-449818-d0.censo2018.personas`
+               WHERE U_DPTO = '11'
+"
+
+df_bta_lz <- tbl(con, sql(string_Bta)) 
+df_btaM_lz <- df_bta_lz %>% filter(P_SEXO == 2L)
+
+
+```
+
+```{r}
+query_btaM <- df_btaM_lz %>% sql_render()
+
+bq_project_query(
+  x = "premium-summit-449818-d0",  # Proyecto de Google Cloud
+  query = query_btaM,                          # Consulta SQL del lazy dataframe
+  destination_table = "premium-summit-449818-d0.censo2018.btaMujeres",  # Tabla destino en BigQuery
+  write_disposition = "WRITE_TRUNCATE",    # Reemplazar la tabla si ya existe
+  quiet = FALSE                           # Mostrar mensajes de progreso
+)
+
+```
+
+
+##. Hacer la consulta en sql nativo desde R y mandarla a bigquery
+
+```{r}
+CONSULTA_INGENIERO <- "
+CREATE OR REPLACE TABLE `premium-summit-449818-d0.censo2018.tablainge` AS
+SELECT
+  U_DPTO,
+  U_MPIO,
+  VA1_ESTRATO,
+  n,
+  ROUND((n / SUM(n) OVER (PARTITION BY U_DPTO, U_MPIO)) * 100.0, 1) AS por
+FROM (
+  SELECT
+    U_DPTO,
+    U_MPIO,
+    VA1_ESTRATO,
+    COUNT(*) AS n
+  FROM (
+    SELECT
+      LHS.COD_ENCUESTAS,
+      LHS.U_DPTO,
+      LHS.U_MPIO,
+      RHS.VA1_ESTRATO
+    FROM
+      `premium-summit-449818-d0.censo2018.personas` AS LHS
+    INNER JOIN
+      `premium-summit-449818-d0.censo2018.viviendas` AS RHS
+    ON
+      LHS.COD_ENCUESTAS = RHS.COD_ENCUESTAS
+  )
+  GROUP BY
+    U_DPTO,
+    U_MPIO,
+    VA1_ESTRATO
+)
+"
+```
+
+
+
+```{r}
+dbExecute(con, CONSULTA_INGENIERO)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+```
+
